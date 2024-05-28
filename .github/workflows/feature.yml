@@ -1,1 +1,97 @@
+# This workflow will build a MuleSoft project and deploy to CloudHub
 
+name: Build and Deploy to Development
+
+on:
+  push:
+    branches: [feature]
+  workflow_dispatch:
+    
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CONNECTED_APP_CLIENT_ID: ${{ secrets.CONNECTED_APP_CLIENT_ID }}
+      CONNECTED_APP_CLIENT_SECRET: ${{ secrets.CONNECTED_APP_CLIENT_SECRET }}
+      MULE_KEY: ${{ secrets.MULE_KEY_DEV }}
+      ANYPOINT_PLATFORM_CLIENT_ID : ${{ secrets.ANYPOINT_PLATFORM_CLIENT_ID }}
+      ANYPOINT_PLATFORM_CLIENT_SECRET : ${{ secrets.ANYPOINT_PLATFORM_CLIENT_SECRET }}
+      CONNECTED_APP : ${{vars.CONNECTED_APP }}
+      ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+      PRIVATE_SPACE : ${{ vars.PRIVATE_SPACE }}
+      BUSINESS_GROUP_ID : ${{ vars.BUSINESS_GROUP_ID }}
+      BUSINESS_GROUP_NAME : ${{ vars.BUSINESS_GROUP_NAME }}
+      MULE_ENV : ${{ vars.MULE_ENV }}
+      BUILD_NUMBER : 1.0.1-${{ github.run_id }}${{ github.run_attempt }}-Dev
+      PUBLIC_URL : ${{ vars.PUBLIC_URL }}
+
+    
+    steps:
+    
+    - name: Checkout repository
+      uses: actions/checkout@v2
+    
+    - name: Cache Depenedencies
+      uses: actions/setup-java@v2
+      with:
+        java-version: '11'
+        distribution: 'adopt'
+        cache: maven
+    
+    - name: Build with maven
+      run: mvn -B clean package -DskipMunitTests -Dmule.env=dev -Dmule.encryptionKey=${{ env.MULE_KEY }}  -s .maven/settings.xml
+    
+    - name: Stamp artifact file name with commit hash
+      run: |
+        artifactName1=$(ls target/*.jar | head -1)
+        commitHash=$(git rev-parse --short "$GITHUB_SHA")
+        artifactName2=$(ls target/*.jar | head -1 | sed "s/.jar/-$commitHash.jar/g")
+        mv $artifactName1 $artifactName2
+    
+    - name: Upload artifact 
+      uses: actions/upload-artifact@master
+      with:
+          name: artifacts
+          path: target/*.jar
+      if: always()  
+      
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      CONNECTED_APP_CLIENT_ID: ${{ secrets.CONNECTED_APP_CLIENT_ID }}
+      CONNECTED_APP_CLIENT_SECRET: ${{ secrets.CONNECTED_APP_CLIENT_SECRET }}
+      MULE_KEY: ${{ secrets.MULE_KEY_DEV }}
+      ANYPOINT_PLATFORM_CLIENT_ID : ${{ secrets.ANYPOINT_PLATFORM_CLIENT_ID }}
+      ANYPOINT_PLATFORM_CLIENT_SECRET : ${{ secrets.ANYPOINT_PLATFORM_CLIENT_SECRET }}
+      CONNECTED_APP : ${{vars.CONNECTED_APP }}
+      ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+      PRIVATE_SPACE : ${{ vars.PRIVATE_SPACE }}
+      BUSINESS_GROUP_ID : ${{ vars.BUSINESS_GROUP_ID }}
+      BUSINESS_GROUP_NAME : ${{ vars.BUSINESS_GROUP_NAME }}
+      MULE_ENV : ${{ vars.MULE_ENV }}
+      BUILD_NUMBER : 1.0.1-${{ github.run_id }}${{ github.run_attempt }}-Dev
+      PUBLIC_URL : ${{ vars.PUBLIC_URL }}
+
+
+    steps:    
+    
+    - name: Checkout repository
+      uses: actions/checkout@v2
+    
+    - uses: actions/cache@v1
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
+    
+    - uses: actions/download-artifact@master
+      with:
+        name: artifacts
+    
+    - name: Deploy to Exchange
+      run: mvn deploy -DskipTests -Dmule.connectedAppClientId=${{ env.CONNECTED_APP_CLIENT_ID }} -Dmule.connectedAppClientSecret=${{ env.CONNECTED_APP_CLIENT_SECRET }} -Dmule.encryptionKey=${{ env.MULE_KEY }}  -Dmule.env=dev -Dmule.applicationName=epoxy-datasync-api -Dmule.grantType=client_credentials -Dmule.target=fubo-pvt-spc -Dmule.environment=${{ env.ENVIRONMENT }} -Dmule.replicas=1 -Dmule.vCores=0.1 -DdeployVersion='1.0.${{ GITHUB.RUN_NUMBER }}' --file pom.xml -s .maven/settings.xml
+      
+    - name: Deploy to Development
+      run: mvn deploy -DskipTests -DmuleDeploy -Dmule.connectedAppClientId=${{ env.CONNECTED_APP_CLIENT_ID }} -Dmule.connectedAppClientSecret=${{ env.CONNECTED_APP_CLIENT_SECRET }} -Dmule.encryptionKey=${{ env.MULE_KEY }}  -Dmule.env=dev -Dmule.applicationName=epoxy-datasync-api-dev -Dmule.grantType=client_credentials -Dmule.target=fubo-pvt-spc -Dmule.environment=${{ env.ENVIRONMENT }} -Dmule.replicas=1 -Dmule.vCores=0.1 -DdeployVersion='1.0.${{ GITHUB.RUN_NUMBER }}' --file pom.xml -s .maven/settings.xml
